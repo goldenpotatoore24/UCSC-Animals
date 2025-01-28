@@ -3,36 +3,34 @@ import mongoose from 'mongoose';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import multer from 'multer';
-import { v2 as cloudinary } from 'cloudinary';
 import { CloudinaryStorage } from 'multer-storage-cloudinary';
+import { v2 as cloudinary } from 'cloudinary';
 
 dotenv.config();
 
-// Configure Cloudinary - replace these with your actual credentials
+// Configure Cloudinary
 cloudinary.config({
-    cloud_name: 'YOUR_CLOUD_NAME',
-    api_key: 'YOUR_API_KEY',
-    api_secret: 'YOUR_API_SECRET'
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-const app = express();
-
-// Configure Cloudinary storage
+// Configure multer storage with Cloudinary
 const storage = new CloudinaryStorage({
     cloudinary: cloudinary,
     params: {
         folder: 'wildlife-sightings',
-        allowed_formats: ['jpg', 'jpeg', 'png'],
-        transformation: [{ width: 1000, crop: "limit" }] // Resize large images
+        allowed_formats: ['jpg', 'jpeg', 'png', 'gif'],
+        transformation: [{ width: 1000, height: 1000, crop: 'limit' }]
     }
 });
 
-const upload = multer({
+const upload = multer({ 
     storage: storage,
-    limits: {
-        fileSize: 5 * 1024 * 1024 // 5MB limit
-    }
+    limits: { fileSize: 5 * 1024 * 1024 } // 5MB limit
 });
+
+const app = express();
 
 // Middleware
 app.use(cors());
@@ -81,10 +79,10 @@ const Sighting = mongoose.model('Sighting', sightingSchema);
 
 // Routes
 
-// Get all active sightings (less than 1 hour old)
+// GET all active sightings (less than 1 hour old)
 app.get('/api/sightings', async (req, res) => {
     try {
-        const hourAgo = new Date(Date.now() - 3600000);
+        const hourAgo = new Date(Date.now() - 3600000); // 1 hour ago
         const sightings = await Sighting.find({
             lastUpdate: { $gte: hourAgo }
         }).sort({ timestamp: -1 });
@@ -95,17 +93,22 @@ app.get('/api/sightings', async (req, res) => {
     }
 });
 
-// Add new sighting with image
+// POST new sighting with image
 app.post('/api/sightings', upload.single('image'), async (req, res) => {
     try {
         if (!req.file) {
             return res.status(400).json({ error: 'Image is required' });
         }
 
+        const locationData = JSON.parse(req.body.location);
+        
         const sighting = new Sighting({
             animal: req.body.animal,
             isBaby: req.body.isBaby === 'true',
-            location: JSON.parse(req.body.location),
+            location: {
+                lat: parseFloat(locationData.lat),
+                lng: parseFloat(locationData.lng)
+            },
             imageUrl: req.file.path
         });
 
@@ -113,17 +116,6 @@ app.post('/api/sightings', upload.single('image'), async (req, res) => {
         res.status(201).json(savedSighting);
     } catch (error) {
         console.error('Error creating sighting:', error);
-        
-        // If there was an error, try to delete the uploaded image
-        if (req.file?.path) {
-            try {
-                const publicId = req.file.filename;
-                await cloudinary.uploader.destroy(publicId);
-            } catch (cloudinaryError) {
-                console.error('Error deleting image:', cloudinaryError);
-            }
-        }
-
         if (error.name === 'ValidationError') {
             return res.status(400).json({ error: error.message });
         }
@@ -131,15 +123,18 @@ app.post('/api/sightings', upload.single('image'), async (req, res) => {
     }
 });
 
-// Refresh sighting timestamp
+// POST refresh a sighting's timestamp ("Still here" functionality)
 app.post('/api/sightings/:id/refresh', async (req, res) => {
     try {
         const sighting = await Sighting.findById(req.params.id);
+        
         if (!sighting) {
             return res.status(404).json({ error: 'Sighting not found' });
         }
+
         sighting.lastUpdate = new Date();
         await sighting.save();
+        
         res.json(sighting);
     } catch (error) {
         console.error('Error refreshing sighting:', error);
@@ -147,35 +142,31 @@ app.post('/api/sightings/:id/refresh', async (req, res) => {
     }
 });
 
-// Delete expired sightings and their images
-const cleanupExpiredSightings = async () => {
+// DELETE expired sightings (called by scheduled task or manually)
+app.delete('/api/sightings/expired', async (req, res) => {
     try {
         const hourAgo = new Date(Date.now() - 3600000);
-        const expiredSightings = await Sighting.find({
+        const result = await Sighting.deleteMany({
             lastUpdate: { $lt: hourAgo }
         });
-
-        // Delete images from Cloudinary
-        for (const sighting of expiredSightings) {
-            try {
-                const publicId = sighting.imageUrl.split('/').pop().split('.')[0];
-                await cloudinary.uploader.destroy(publicId);
-            } catch (error) {
-                console.error('Error deleting image:', error);
-            }
-        }
-
-        // Delete sightings from database
-        await Sighting.deleteMany({
-            lastUpdate: { $lt: hourAgo }
+        
+        res.json({ 
+            message: 'Expired sightings deleted',
+            deletedCount: result.deletedCount 
         });
     } catch (error) {
-        console.error('Error in cleanup job:', error);
+        console.error('Error deleting expired sightings:', error);
+        res.status(500).json({ error: 'Error deleting expired sightings' });
     }
-};
+});
 
-// Run cleanup every 5 minutes
-setInterval(cleanupExpiredSightings, 300000);
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+    res.json({ 
+        status: 'ok',
+        mongoConnection: mongoose.connection.readyState
+    });
+});
 
 // Connect to MongoDB and start server
 const PORT = process.env.PORT || 3000;
@@ -189,8 +180,21 @@ try {
         console.log(`Server is running on port ${PORT}`);
     });
 } catch (error) {
-    console.error('Failed to connect to MongoDB:', error);
+    console.error('Failed to connect to MongoDB:', error.message);
     process.exit(1);
 }
+
+// Cleanup job - runs every 5 minutes to delete expired sightings
+setInterval(async () => {
+    try {
+        const hourAgo = new Date(Date.now() - 3600000);
+        await Sighting.deleteMany({
+            lastUpdate: { $lt: hourAgo }
+        });
+        console.log('Cleanup job completed');
+    } catch (error) {
+        console.error('Error in cleanup job:', error);
+    }
+}, 300000); // 5 minutes
 
 export default app;
