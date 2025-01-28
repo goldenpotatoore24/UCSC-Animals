@@ -157,7 +157,7 @@
                 try {
                     const stream = await navigator.mediaDevices.getUserMedia({ 
                         video: { 
-                            facingMode: 'environment', 
+                            facingMode: 'environment', // Prefer back camera on mobile
                             width: { ideal: 1280 },
                             height: { ideal: 720 }
                         } 
@@ -165,6 +165,8 @@
                     
                     const videoElement = document.getElementById('cameraPreview');
                     videoElement.srcObject = stream;
+                    
+                    // Ensure the video is ready before playing
                     videoElement.onloadedmetadata = () => {
                         videoElement.play();
                     };
@@ -176,28 +178,28 @@
                 }
             };
 
-            const captureImage = () => {
-                if (!cameraStream) return;
+const captureImage = () => {
+    if (!cameraStream) return;
 
-                const videoElement = document.getElementById('cameraPreview');
-                const canvasElement = document.createElement('canvas');
-                canvasElement.width = videoElement.videoWidth;
-                canvasElement.height = videoElement.videoHeight;
-                
-                const context = canvasElement.getContext('2d');
-                context.drawImage(videoElement, 0, 0);
-                
-                // Stop camera stream
-                cameraStream.getTracks().forEach(track => track.stop());
-                setCameraStream(null);
+    const videoElement = document.getElementById('cameraPreview');
+    const canvasElement = document.createElement('canvas');
+    canvasElement.width = videoElement.videoWidth;
+    canvasElement.height = videoElement.videoHeight;
+    
+    const context = canvasElement.getContext('2d');
+    context.drawImage(videoElement, 0, 0);
+    
+    // Stop camera stream
+    cameraStream.getTracks().forEach(track => track.stop());
+    setCameraStream(null);
 
-                // Convert canvas to blob
-                canvasElement.toBlob((blob) => {
-                    const file = new File([blob], 'wildlife-sighting.jpg', { type: 'image/jpeg' });
-                    setImageFile(file);
-                    setImagePreview(URL.createObjectURL(file));
-                }, 'image/jpeg');
-            };
+    // Convert canvas to blob
+    canvasElement.toBlob((blob) => {
+        const file = new File([blob], 'wildlife-sighting.jpg', { type: 'image/jpeg' });
+        setImageFile(file);
+        setImagePreview(URL.createObjectURL(file));
+    }, 'image/jpeg');
+};
 
 const getCurrentLocation = () => {
     if (!navigator.geolocation) {
