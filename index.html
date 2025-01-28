@@ -163,22 +163,13 @@
                         } 
                     });
                     
-                    // Use a setTimeout to ensure DOM is ready
-                    setTimeout(() => {
-                        const videoElement = document.getElementById('cameraPreview');
-                        if (videoElement) {
-                            videoElement.srcObject = stream;
-                            
-                            videoElement.onloadedmetadata = () => {
-                                videoElement.play();
-                            };
-                            
-                            setCameraStream(stream);
-                        } else {
-                            console.error('Video element not found');
-                            setError('Could not find video element');
-                        }
-                    }, 100);
+                    const videoElement = document.getElementById('cameraPreview');
+                    videoElement.srcObject = stream;
+                    videoElement.onloadedmetadata = () => {
+                        videoElement.play();
+                    };
+                    
+                    setCameraStream(stream);
                 } catch (err) {
                     console.error('Camera access error:', err);
                     setError(`Could not access camera: ${err.message}`);
@@ -208,7 +199,7 @@
                 }, 'image/jpeg');
             };
 
-            const getCurrentLocation = () => {
+const getCurrentLocation = () => {
     if (!navigator.geolocation) {
         setError('Geolocation is not supported by your browser');
         return;
@@ -227,8 +218,8 @@
             map.panTo(location);
             map.setZoom(17);
             
-            // Ensure the form is rendered before starting camera
-            requestAnimationFrame(startCamera);
+            // Start camera after getting location
+            startCamera();
         },
         () => {
             setError('Unable to get your location');
