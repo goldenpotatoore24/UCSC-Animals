@@ -58,6 +58,12 @@
             const [loading, setLoading] = React.useState(true);
             const [selectedImage, setSelectedImage] = React.useState(null);
             const [imagePreview, setImagePreview] = React.useState(null);
+            
+            const [formData, setFormData] = React.useState({
+                     animal: '',
+                    isBaby: false
+                  });
+
 
             React.useEffect(() => {
                 fetchSightings();
@@ -87,21 +93,38 @@
             };
 
             const handleImageChange = (e) => {
-                const file = e.target.files[0];
-                if (file) {
-                    if (file.size > 5 * 1024 * 1024) {
-                        setError('Image must be smaller than 5MB');
-                        return;
-                    }
+    const file = e.target.files[0];
+    if (file) {
+        // Validate file size (5MB limit)
+        if (file.size > 5 * 1024 * 1024) {
+            setError('Image must be smaller than 5MB');
+            return;
+        }
 
-                    const reader = new FileReader();
-                    reader.onloadend = () => {
-                        setSelectedImage(file);
-                        setImagePreview(reader.result);
-                    };
-                    reader.readAsDataURL(file);
-                }
-            };
+        // Validate file type
+        const validTypes = ['image/jpeg', 'image/png', 'image/jpg'];
+        if (!validTypes.includes(file.type)) {
+            setError('Only JPG and PNG images are allowed');
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            setSelectedImage(file);
+            setImagePreview(reader.result);
+            setError(''); // Clear any previous errors
+        };
+        reader.readAsDataURL(file);
+    }
+};
+
+const handleInputChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    setFormData(prev => ({
+        ...prev,
+        [name]: type === 'checkbox' ? checked : value
+    }));
+};
 
             const handleStillHere = async (sightingId) => {
                 try {
@@ -118,34 +141,55 @@
             // Rest of your existing functions (fetchSightings, initializeMap, etc.)
             // Modified handleSubmit to include image upload
             const handleSubmit = async (e) => {
-                e.preventDefault();
-                if (!selectedImage) {
-                    setError('Please add a photo of the animal');
-                    return;
-                }
+    e.preventDefault();
+    
+    // Validate form submission
+    if (!selectedImage) {
+        setError('Please add a photo of the animal');
+        return;
+    }
 
-                const formData = new FormData(e.target);
-                formData.append('image', selectedImage);
-                formData.append('location', JSON.stringify(userLocation));
+    if (!userLocation) {
+        setError('Please select a location on the map');
+        return;
+    }
 
-                try {
-                    const response = await fetch(`${API_URL}/sightings`, {
-                        method: 'POST',
-                        body: formData
-                    });
-                    
-                    if (!response.ok) throw new Error('Failed to save sighting');
-                    
-                    const savedSighting = await response.json();
-                    setSightings([savedSighting, ...sightings]);
-                    setShowAddForm(false);
-                    setUserLocation(null);
-                    setSelectedImage(null);
-                    setImagePreview(null);
-                } catch (err) {
-                    setError('Failed to save sighting: ' + err.message);
-                }
-            };
+    if (!formData.animal) {
+        setError('Please select an animal type');
+        return;
+    }
+
+    const formDataToSubmit = new FormData();
+    formDataToSubmit.append('image', selectedImage);
+    formDataToSubmit.append('animal', formData.animal);
+    formDataToSubmit.append('isBaby', formData.isBaby);
+    formDataToSubmit.append('location', JSON.stringify(userLocation));
+
+    try {
+        const response = await fetch(`${API_URL}/sightings`, {
+            method: 'POST',
+            body: formDataToSubmit
+        });
+        
+        if (!response.ok) throw new Error('Failed to save sighting');
+        
+        const savedSighting = await response.json();
+        setSightings([savedSighting, ...sightings]);
+        
+        // Reset form state
+        setShowAddForm(false);
+        setUserLocation(null);
+        setSelectedImage(null);
+        setImagePreview(null);
+        setFormData({
+            animal: '',
+            isBaby: false
+        });
+        setError('');
+    } catch (err) {
+        setError('Failed to save sighting: ' + err.message);
+    }
+};
 
             // Modify your existing form JSX to include these new elements
             return (
@@ -155,30 +199,77 @@
                             {/* Your existing header */}
                             
                             {showAddForm && (
-                                <form onSubmit={handleSubmit} className="space-y-4 mb-6 bg-gray-50 p-4 rounded-lg">
-                                    {/* Existing form fields */}
-                                    
-                                    <div>
-                                        <label className="block mb-2">📸 Photo</label>
-                                        <input
-                                            type="file"
-                                            accept="image/*"
-                                            onChange={handleImageChange}
-                                            required
-                                            className="w-full p-2 border rounded-lg"
-                                        />
-                                        {imagePreview && (
-                                            <img 
-                                                src={imagePreview} 
-                                                alt="Preview" 
-                                                className="mt-2 image-preview rounded"
-                                            />
-                                        )}
-                                    </div>
-                                    
-                                    {/* Rest of your form */}
-                                </form>
-                            )}
+    <form onSubmit={handleSubmit} className="space-y-4 mb-6 bg-gray-50 p-4 rounded-lg">
+        <div>
+            <label className="block mb-2">🐾 Animal Type</label>
+            <select
+                name="animal"
+                value={formData.animal}
+                onChange={handleInputChange}
+                required
+                className="w-full p-2 border rounded-lg"
+            >
+                <option value="">Select an animal</option>
+                {ANIMALS.map(animal => (
+                    <option key={animal.id} value={animal.id}>
+                        {animal.emoji} {animal.label}
+                    </option>
+                ))}
+            </select>
+        </div>
+
+        <div className="flex items-center">
+            <input
+                type="checkbox"
+                name="isBaby"
+                checked={formData.isBaby}
+                onChange={handleInputChange}
+                className="mr-2"
+            />
+            <label>Is this a baby animal? 🍼</label>
+        </div>
+
+        <div>
+            <label className="block mb-2">📸 Photo</label>
+            <input
+                type="file"
+                accept="image/jpeg,image/png"
+                onChange={handleImageChange}
+                required
+                className="w-full p-2 border rounded-lg"
+            />
+            {imagePreview && (
+                <img 
+                    src={imagePreview} 
+                    alt="Preview" 
+                    className="mt-2 image-preview rounded"
+                />
+            )}
+        </div>
+
+        <div>
+            <label className="block mb-2">📍 Location</label>
+            <p className="text-sm text-gray-600">
+                {userLocation 
+                    ? `Lat: ${userLocation.lat.toFixed(4)}, Lng: ${userLocation.lng.toFixed(4)}` 
+                    : 'Click on the map to select location'}
+            </p>
+        </div>
+
+        {error && (
+            <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative" role="alert">
+                {error}
+            </div>
+        )}
+
+        <button
+            type="submit"
+            className="w-full bg-green-500 text-white p-2 rounded hover:bg-green-600"
+        >
+            Submit Sighting
+        </button>
+    </form>
+)}
 
                             <div className="space-y-4">
                                 <h3 className="text-lg font-semibold">📝 Recent Sightings</h3>
