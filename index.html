@@ -175,7 +175,7 @@
                     const savedSighting = await response.json();
                     setSightings([savedSighting, ...sightings]);
                     setShowAddForm(false);
-                    setUserLocation(null);
+                    setUserLocation(null);//
                 } catch (err) {
                     setError('Failed to save sighting');
                 }
