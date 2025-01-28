@@ -154,15 +154,29 @@
                 setMarkers(newMarkers);
             };
             const startCamera = async () => {
-    try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-        const videoElement = document.getElementById('cameraPreview');
-        videoElement.srcObject = stream;
-        setCameraStream(stream);
-    } catch (err) {
-        setError('Could not access camera');
-    }
-};
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ 
+                        video: { 
+                            facingMode: 'environment', // Prefer back camera on mobile
+                            width: { ideal: 1280 },
+                            height: { ideal: 720 }
+                        } 
+                    });
+                    
+                    const videoElement = document.getElementById('cameraPreview');
+                    videoElement.srcObject = stream;
+                    
+                    // Ensure the video is ready before playing
+                    videoElement.onloadedmetadata = () => {
+                        videoElement.play();
+                    };
+                    
+                    setCameraStream(stream);
+                } catch (err) {
+                    console.error('Camera access error:', err);
+                    setError(`Could not access camera: ${err.message}`);
+                }
+            };
 
 const captureImage = () => {
     if (!cameraStream) return;
