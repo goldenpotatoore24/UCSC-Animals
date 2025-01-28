@@ -1,10 +1,7 @@
-// ES Modules version of server.js
 import express from 'express';
 import mongoose from 'mongoose';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { fileURLToPath } from 'url';
-import { dirname } from 'path';
 
 // Load environment variables
 dotenv.config();
@@ -15,6 +12,14 @@ const app = express();
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+// MongoDB connection options
+const mongooseOptions = {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+    serverSelectionTimeoutMS: 5000, // Timeout after 5s instead of 30s
+    retryWrites: true,
+};
 
 // MongoDB Schema
 const sightingSchema = new mongoose.Schema({
@@ -50,14 +55,17 @@ const sightingSchema = new mongoose.Schema({
 // Create MongoDB model
 const Sighting = mongoose.model('Sighting', sightingSchema);
 
-// Routes
+// Health check route
+app.get('/health', (req, res) => {
+    res.json({ status: 'ok', mongoConnection: mongoose.connection.readyState });
+});
 
-// GET all sightings
+// Routes
 app.get('/api/sightings', async (req, res) => {
     try {
         const sightings = await Sighting.find()
-            .sort({ timestamp: -1 }) // Sort by newest first
-            .limit(100); // Limit to last 100 sightings for performance
+            .sort({ timestamp: -1 })
+            .limit(100);
         res.json(sightings);
     } catch (error) {
         console.error('Error fetching sightings:', error);
@@ -65,16 +73,13 @@ app.get('/api/sightings', async (req, res) => {
     }
 });
 
-// POST new sighting
 app.post('/api/sightings', async (req, res) => {
     try {
-        // Validate required fields
         const { animal, location } = req.body;
         if (!animal || !location || !location.lat || !location.lng) {
             return res.status(400).json({ error: 'Missing required fields' });
         }
 
-        // Create new sighting
         const sighting = new Sighting({
             animal: req.body.animal,
             isBaby: req.body.isBaby || false,
@@ -84,75 +89,55 @@ app.post('/api/sightings', async (req, res) => {
             }
         });
 
-        // Save to database
         const savedSighting = await sighting.save();
         res.status(201).json(savedSighting);
     } catch (error) {
         console.error('Error creating sighting:', error);
-        
-        // Handle validation errors
         if (error.name === 'ValidationError') {
             return res.status(400).json({ error: error.message });
         }
-        
         res.status(500).json({ error: 'Error creating sighting' });
     }
 });
 
-// GET sightings within date range
-app.get('/api/sightings/range', async (req, res) => {
-    try {
-        const { start, end } = req.query;
-        const query = {};
-        
-        if (start || end) {
-            query.timestamp = {};
-            if (start) query.timestamp.$gte = new Date(start);
-            if (end) query.timestamp.$lte = new Date(end);
-        }
-
-        const sightings = await Sighting.find(query).sort({ timestamp: -1 });
-        res.json(sightings);
-    } catch (error) {
-        console.error('Error fetching sightings by date range:', error);
-        res.status(500).json({ error: 'Error fetching sightings' });
-    }
-});
-
-// GET sightings by animal type
-app.get('/api/sightings/:animal', async (req, res) => {
-    try {
-        const sightings = await Sighting.find({ 
-            animal: req.params.animal 
-        }).sort({ timestamp: -1 });
-        res.json(sightings);
-    } catch (error) {
-        console.error('Error fetching sightings by animal:', error);
-        res.status(500).json({ error: 'Error fetching sightings' });
-    }
-});
-
-// Error handling middleware
-app.use((err, req, res, next) => {
-    console.error(err.stack);
-    res.status(500).json({ error: 'Something broke!' });
-});
-
 // Connect to MongoDB and start server
 const PORT = process.env.PORT || 3000;
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/wildlife-tracker';
+const MONGODB_URI = process.env.MONGODB_URI;
 
-mongoose.connect(MONGODB_URI)
+// Print connection string (without credentials) for debugging
+console.log('Attempting to connect to MongoDB at:', 
+    MONGODB_URI.replace(/mongodb\+srv:\/\/[^:]+:[^@]+@/, 'mongodb+srv://USERNAME:PASSWORD@'));
+
+mongoose.connect(MONGODB_URI, mongooseOptions)
     .then(() => {
-        console.log('Connected to MongoDB');
+        console.log('Connected to MongoDB successfully');
         app.listen(PORT, () => {
             console.log(`Server is running on port ${PORT}`);
         });
     })
     .catch((error) => {
-        console.error('MongoDB connection error:', error);
+        console.error('Detailed MongoDB connection error:', {
+            name: error.name,
+            message: error.message,
+            code: error.code,
+            codeName: error.codeName,
+            serverHost: error.serverHost,
+        });
         process.exit(1);
     });
+
+// Monitor MongoDB connection
+mongoose.connection.on('connected', () => {
+    console.log('Mongoose connected to MongoDB');
+});
+
+mongoose.connection.on('error', (err) => {
+    console.error('Mongoose connection error:', err);
+});
+
+mongoose.connection.on('disconnected', () => {
+    console.log('Mongoose disconnected from MongoDB');
+});
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
@@ -167,3 +152,5 @@ process.on('SIGTERM', () => {
             process.exit(1);
         });
 });
+
+export default app;
