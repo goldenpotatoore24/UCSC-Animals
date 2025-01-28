@@ -2,9 +2,19 @@ import express from 'express';
 import mongoose from 'mongoose';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import { v2 as cloudinary } from 'cloudinary';
+import multer from 'multer';
+import streamifier from 'streamifier';
 
 // Load environment variables
 dotenv.config();
+
+// Configure Cloudinary
+cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET
+});
 
 // Initialize express
 const app = express();
@@ -13,13 +23,8 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// MongoDB connection options
-const mongooseOptions = {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-    serverSelectionTimeoutMS: 5000, // Timeout after 5s instead of 30s
-    retryWrites: true,
-};
+// Multer for handling file uploads
+const upload = multer();
 
 // MongoDB Schema
 const sightingSchema = new mongoose.Schema({
@@ -46,6 +51,10 @@ const sightingSchema = new mongoose.Schema({
             max: 180
         }
     },
+    imageUrl: {
+        type: String,
+        required: true
+    },
     timestamp: {
         type: Date,
         default: Date.now,
@@ -59,6 +68,27 @@ const sightingSchema = new mongoose.Schema({
 
 // Create MongoDB model
 const Sighting = mongoose.model('Sighting', sightingSchema);
+
+// Cloudinary upload helper function
+const uploadToCloudinary = (buffer) => {
+    return new Promise((resolve, reject) => {
+        const uploadStream = cloudinary.uploader.upload_stream(
+            { 
+                folder: 'wildlife-tracker',
+                transformation: [
+                    { width: 800, crop: "limit" },
+                    { quality: "auto" }
+                ]
+            },
+            (error, result) => {
+                if (error) reject(error);
+                else resolve(result);
+            }
+        );
+
+        streamifier.createReadStream(buffer).pipe(uploadStream);
+    });
+};
 
 // Periodic cleanup job (additional safety)
 const cleanupExpiredSightings = async () => {
@@ -92,20 +122,29 @@ app.get('/api/sightings', async (req, res) => {
     }
 });
 
-app.post('/api/sightings', async (req, res) => {
+app.post('/api/sightings', upload.single('image'), async (req, res) => {
     try {
-        const { animal, location } = req.body;
+        // Validate required fields
+        const { animal, location, isBaby } = JSON.parse(req.body.data);
+        if (!req.file) {
+            return res.status(400).json({ error: 'Image is required' });
+        }
         if (!animal || !location || !location.lat || !location.lng) {
             return res.status(400).json({ error: 'Missing required fields' });
         }
 
+        // Upload image to Cloudinary
+        const cloudinaryResult = await uploadToCloudinary(req.file.buffer);
+
+        // Create sighting with Cloudinary image URL
         const sighting = new Sighting({
-            animal: req.body.animal,
-            isBaby: req.body.isBaby || false,
+            animal: animal,
+            isBaby: isBaby || false,
             location: {
                 lat: parseFloat(location.lat),
                 lng: parseFloat(location.lng)
-            }
+            },
+            imageUrl: cloudinaryResult.secure_url
         });
 
         const savedSighting = await sighting.save();
@@ -119,7 +158,7 @@ app.post('/api/sightings', async (req, res) => {
     }
 });
 
-// New route to mark a sighting as "still here"
+// Route to mark a sighting as "still here"
 app.post('/api/sightings/:id/still-here', async (req, res) => {
     try {
         const sighting = await Sighting.findByIdAndUpdate(
@@ -150,23 +189,28 @@ const MONGODB_URI = process.env.MONGODB_URI;
 console.log('Attempting to connect to MongoDB at:', 
     MONGODB_URI.replace(/mongodb\+srv:\/\/[^:]+:[^@]+@/, 'mongodb+srv://USERNAME:PASSWORD@'));
 
-mongoose.connect(MONGODB_URI, mongooseOptions)
-    .then(() => {
-        console.log('Connected to MongoDB successfully');
-        app.listen(PORT, () => {
-            console.log(`Server is running on port ${PORT}`);
-        });
-    })
-    .catch((error) => {
-        console.error('Detailed MongoDB connection error:', {
-            name: error.name,
-            message: error.message,
-            code: error.code,
-            codeName: error.codeName,
-            serverHost: error.serverHost,
-        });
-        process.exit(1);
+mongoose.connect(MONGODB_URI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+    serverSelectionTimeoutMS: 5000,
+    retryWrites: true,
+})
+.then(() => {
+    console.log('Connected to MongoDB successfully');
+    app.listen(PORT, () => {
+        console.log(`Server is running on port ${PORT}`);
     });
+})
+.catch((error) => {
+    console.error('Detailed MongoDB connection error:', {
+        name: error.name,
+        message: error.message,
+        code: error.code,
+        codeName: error.codeName,
+        serverHost: error.serverHost,
+    });
+    process.exit(1);
+});
 
 // Monitor MongoDB connection
 mongoose.connection.on('connected', () => {
