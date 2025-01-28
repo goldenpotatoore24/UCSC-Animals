@@ -47,19 +47,93 @@
         });
 
         const formatRelativeTime = (timestamp) => {
-    const now = new Date();
-    const past = new Date(timestamp);
-    const diffInSeconds = Math.floor((now - past) / 1000);
-    
-    if (diffInSeconds < 60) return 'just now';
-    if (diffInSeconds < 3600) {
-        const minutes = Math.floor(diffInSeconds / 60);
-        return `${minutes} minute${minutes !== 1 ? 's' : ''} ago`;
-    }
-    
-    const hours = Math.floor(diffInSeconds / 3600);
-    return `${hours} hour${hours !== 1 ? 's' : ''} ago`;
-};
+            const now = new Date();
+            const past = new Date(timestamp);
+            const diffInSeconds = Math.floor((now - past) / 1000);
+            
+            if (diffInSeconds < 60) return 'just now';
+            if (diffInSeconds < 3600) {
+                const minutes = Math.floor(diffInSeconds / 60);
+                return `${minutes} minute${minutes !== 1 ? 's' : ''} ago`;
+            }
+            
+            const hours = Math.floor(diffInSeconds / 3600);
+            return `${hours} hour${hours !== 1 ? 's' : ''} ago`;
+        };
+
+        const CameraCapture = ({ onImageCapture }) => {
+            const videoRef = React.useRef(null);
+            const [hasPermission, setHasPermission] = React.useState(null);
+            const [showCamera, setShowCamera] = React.useState(false);
+
+            const startCamera = async () => {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ 
+                        video: { facingMode: 'environment' } 
+                    });
+                    if (videoRef.current) {
+                        videoRef.current.srcObject = stream;
+                        setHasPermission(true);
+                        setShowCamera(true);
+                    }
+                } catch (err) {
+                    console.error('Error accessing camera:', err);
+                    setHasPermission(false);
+                }
+            };
+
+            const captureImage = () => {
+                if (!videoRef.current) return;
+
+                const canvas = document.createElement('canvas');
+                canvas.width = videoRef.current.videoWidth;
+                canvas.height = videoRef.current.videoHeight;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(videoRef.current, 0, 0);
+                
+                canvas.toBlob(blob => {
+                    onImageCapture(blob);
+                    // Stop the camera stream
+                    const stream = videoRef.current.srcObject;
+                    const tracks = stream.getTracks();
+                    tracks.forEach(track => track.stop());
+                    setShowCamera(false);
+                }, 'image/jpeg', 0.8);
+            };
+
+            return (
+                <div className="relative">
+                    {!showCamera ? (
+                        <button
+                            onClick={startCamera}
+                            className="w-full px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+                        >
+                            📸 Take Photo
+                        </button>
+                    ) : (
+                        <div className="relative">
+                            <video
+                                ref={videoRef}
+                                autoPlay
+                                playsInline
+                                className="w-full h-64 object-cover rounded-lg"
+                            />
+                            <button
+                                onClick={captureImage}
+                                className="absolute bottom-4 left-1/2 transform -translate-x-1/2 px-6 py-3 bg-white rounded-full shadow-lg"
+                            >
+                                📸
+                            </button>
+                        </div>
+                    )}
+                    {hasPermission === false && (
+                        <p className="text-red-500 mt-2">
+                            Camera access denied. Please enable camera access in your browser settings.
+                        </p>
+                    )}
+                </div>
+            );
+        };
 
         function WildlifeTracker() {
             const [sightings, setSightings] = React.useState([]);
@@ -69,6 +143,7 @@
             const [map, setMap] = React.useState(null);
             const [markers, setMarkers] = React.useState([]);
             const [loading, setLoading] = React.useState(true);
+            const [capturedImage, setCapturedImage] = React.useState(null);
 
             React.useEffect(() => {
                 // Initialize map
@@ -102,8 +177,6 @@
                 }
             };
 
-            
-
             React.useEffect(() => {
                 if (map && sightings.length > 0) {
                     updateMapMarkers();
@@ -130,6 +203,7 @@
                             <div class="p-2">
                                 <h3 class="text-lg font-bold">${emoji} ${animal.label}${sighting.isBaby ? ' (Baby)' : ''}</h3>
                                 <p class="text-sm">🕒 ${new Date(sighting.timestamp).toLocaleString()}</p>
+                                <img src="${sighting.imageUrl}" alt="${animal.label}" class="w-full h-32 object-cover mt-2 rounded-lg" />
                             </div>
                         `
                     });
@@ -169,53 +243,59 @@
 
             const handleSubmit = async (e) => {
                 e.preventDefault();
-                const formData = new FormData(e.target);
-                const newSighting = {
-                    animal: formData.get('animal'),
-                    isBaby: formData.get('isBaby') === 'true',
+                if (!capturedImage) {
+                    setError('Please take a photo first');
+                    return;
+                }
+
+                const formData = new FormData();
+                const sightingData = {
+                    animal: e.target.animal.value,
+                    isBaby: e.target.isBaby.value === 'true',
                     location: userLocation,
                 };
-                
+
+                formData.append('sighting', JSON.stringify(sightingData));
+                formData.append('image', capturedImage, 'wildlife.jpg');
+
                 try {
                     const response = await fetch(`${API_URL}/sightings`, {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify(newSighting),
+                        body: formData,
                     });
-                    
+
                     if (!response.ok) throw new Error('Failed to save sighting');
-                    
+
                     const savedSighting = await response.json();
                     setSightings([savedSighting, ...sightings]);
                     setShowAddForm(false);
-                    setUserLocation(null);//
+                    setUserLocation(null);
+                    setCapturedImage(null);
                 } catch (err) {
                     setError('Failed to save sighting');
                 }
             };
 
             const handleStillHere = async (sightingId) => {
-    try {
-        const response = await fetch(`${API_URL}/sightings/${sightingId}/still-here`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-        });
-        
-        if (!response.ok) throw new Error('Failed to update sighting');
-        
-        // Update the sightings list with the updated sighting
-        const updatedSighting = await response.json();
-        setSightings(sightings.map(sighting => 
-            sighting._id === sightingId ? updatedSighting : sighting
-        ));
-    } catch (err) {
-        setError('Failed to mark sighting as still here');
-    }
-};
+                try {
+                    const response = await fetch(`${API_URL}/sightings/${sightingId}/still-here`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                    });
+                    
+                    if (!response.ok) throw new Error('Failed to update sighting');
+                    
+                    // Update the sightings list with the updated sighting
+                    const updatedSighting = await response.json();
+                    setSightings(sightings.map(sighting => 
+                        sighting._id === sightingId ? updatedSighting : sighting
+                    ));
+                } catch (err) {
+                    setError('Failed to mark sighting as still here');
+                }
+            };
 
             return (
                 <div className="max-w-7xl mx-auto p-4">
@@ -290,16 +370,37 @@
                                             </div>
                                         )}
 
+                                        <div className="space-y-4">
+                                            {capturedImage ? (
+                                                <div className="relative">
+                                                    <img
+                                                        src={URL.createObjectURL(capturedImage)}
+                                                        alt="Captured"
+                                                        className="w-full h-64 object-cover rounded-lg"
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setCapturedImage(null)}
+                                                        className="absolute top-2 right-2 bg-white rounded-full p-2 shadow-lg"
+                                                    >
+                                                        ❌
+                                                    </button>
+                                                </div>
+                                            ) : (
+                                                <CameraCapture onImageCapture={setCapturedImage} />
+                                            )}
+                                        </div>
+
                                         <button
                                             type="submit"
-                                            disabled={!userLocation}
+                                            disabled={!userLocation || !capturedImage}
                                             className={`w-full px-4 py-2 rounded-lg ${
-                                                userLocation 
+                                                userLocation && capturedImage
                                                     ? 'bg-green-500 hover:bg-green-600 text-white' 
                                                     : 'bg-gray-300 text-gray-500 cursor-not-allowed'
                                             }`}
                                         >
-                                            {userLocation ? '✅ Submit Sighting' : '⏳ Waiting for location...'}
+                                            {userLocation && capturedImage ? '✅ Submit Sighting' : '⏳ Waiting for location and photo...'}
                                         </button>
                                     </form>
                                 )}
@@ -313,36 +414,43 @@
                                     ) : (
                                         sightings.map(sighting => (
                                             <div
-        key={sighting._id}
-        className="p-4 border rounded-lg hover:bg-gray-50 cursor-pointer flex justify-between items-center"
-        onClick={() => {
-            map.panTo(sighting.location);
-            map.setZoom(17);
-        }}
-    >
-    <div>
-            <h4 className="font-medium">
-                {ANIMALS.find(a => a.id === sighting.animal)?.emoji} 
-                {ANIMALS.find(a => a.id === sighting.animal)?.label}
-                {sighting.isBaby && ' 🍼'}
-            </h4>
-            <p className="text-sm text-gray-600">
-                🕒 {formatRelativeTime(sighting.timestamp)}
-            </p>
-            <p className="text-sm text-gray-600">
-                📍 {sighting.location.lat.toFixed(6)}, {sighting.location.lng.toFixed(6)}
-            </p>
-        </div>
-        <button
-            onClick={(e) => {
-                e.stopPropagation(); // Prevent map pan when clicking the button
-                handleStillHere(sighting._id);
-            }}
-            className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded-lg text-sm"
-        >
-            Still Here
-        </button>
-    </div>
+                                                key={sighting._id}
+                                                className="p-4 border rounded-lg hover:bg-gray-50 cursor-pointer flex justify-between items-center"
+                                                onClick={() => {
+                                                    map.panTo(sighting.location);
+                                                    map.setZoom(17);
+                                                }}
+                                            >
+                                                <div className="flex gap-4">
+                                                    <img
+                                                        src={sighting.imageUrl}
+                                                        alt={`${sighting.animal} sighting`}
+                                                        className="w-24 h-24 object-cover rounded-lg"
+                                                    />
+                                                    <div>
+                                                        <h4 className="font-medium">
+                                                            {ANIMALS.find(a => a.id === sighting.animal)?.emoji} 
+                                                            {ANIMALS.find(a => a.id === sighting.animal)?.label}
+                                                            {sighting.isBaby && ' 🍼'}
+                                                        </h4>
+                                                        <p className="text-sm text-gray-600">
+                                                            🕒 {formatRelativeTime(sighting.timestamp)}
+                                                        </p>
+                                                        <p className="text-sm text-gray-600">
+                                                            📍 {sighting.location.lat.toFixed(6)}, {sighting.location.lng.toFixed(6)}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation(); // Prevent map pan when clicking the button
+                                                        handleStillHere(sighting._id);
+                                                    }}
+                                                    className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded-lg text-sm"
+                                                >
+                                                    Still Here
+                                                </button>
+                                            </div>
                                         ))
                                     )}
                                 </div>
@@ -356,8 +464,6 @@
                 </div>
             );
         }
-
-        
 
         ReactDOM.render(<WildlifeTracker />, document.getElementById('root'));
     </script>
