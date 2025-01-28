@@ -154,48 +154,36 @@
                 setMarkers(newMarkers);
             };
             const startCamera = async () => {
-    try {
-        const stream = await navigator.mediaDevices.getUserMedia({ 
-            video: { 
-                facingMode: 'environment', 
-                width: { ideal: 1280 },
-                height: { ideal: 720 }
-            } 
-        });
-        
-        // Use a more robust method to find the video element
-        const findVideoElement = () => {
-            const videoElement = document.getElementById('cameraPreview');
-            
-            if (videoElement) {
                 try {
-                    videoElement.srcObject = stream;
+                    const stream = await navigator.mediaDevices.getUserMedia({ 
+                        video: { 
+                            facingMode: 'environment', 
+                            width: { ideal: 1280 },
+                            height: { ideal: 720 }
+                        } 
+                    });
                     
-                    videoElement.onloadedmetadata = () => {
-                        videoElement.play().catch(playErr => {
-                            console.error('Error playing video:', playErr);
-                            setError(`Could not play video: ${playErr.message}`);
-                        });
-                    };
-                    
-                    setCameraStream(stream);
+                    // Use a setTimeout to ensure DOM is ready
+                    setTimeout(() => {
+                        const videoElement = document.getElementById('cameraPreview');
+                        if (videoElement) {
+                            videoElement.srcObject = stream;
+                            
+                            videoElement.onloadedmetadata = () => {
+                                videoElement.play();
+                            };
+                            
+                            setCameraStream(stream);
+                        } else {
+                            console.error('Video element not found');
+                            setError('Could not find video element');
+                        }
+                    }, 100);
                 } catch (err) {
-                    console.error('Error setting video source:', err);
-                    setError(`Could not set video source: ${err.message}`);
+                    console.error('Camera access error:', err);
+                    setError(`Could not access camera: ${err.message}`);
                 }
-            } else {
-                console.error('Video element not found, retrying...');
-                // Retry finding the element
-                setTimeout(findVideoElement, 100);
-            }
-        };
-        
-        findVideoElement();
-    } catch (err) {
-        console.error('Camera access error:', err);
-        setError(`Could not access camera: ${err.message}`);
-    }
-};
+            };
 
             const captureImage = () => {
                 if (!cameraStream) return;
@@ -332,41 +320,42 @@ const handleSubmit = async (e) => {
                                     </div>
                                 )}
                                 {cameraStream ? (
-            <div className="mb-4">
-                <video 
-                    id="cameraPreview" 
-                    autoPlay 
-                    playsInline 
-                    className="w-full rounded-lg bg-black"
-                />
-                <button
-                    type="button"
-                    onClick={captureImage}
-                    className="w-full mt-2 bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg"
-                >
-                    📸 Capture Image
-                </button>
-            </div>
-        ) : imagePreview ? (
-            <div className="mb-4">
-                <img 
-                    src={imagePreview} 
-                    alt="Captured wildlife" 
-                    className="w-full rounded-lg"
-                />
-                <button
-                    type="button"
-                    onClick={() => {
-                        setImagePreview(null);
-                        setImageFile(null);
-                        startCamera();
-                    }}
-                    className="w-full mt-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg"
-                >
-                    ❌ Retake Photo
-                </button>
-            </div>
-        ) : null}
+    <div className="mb-4">
+        <video 
+            id="cameraPreview" 
+            autoPlay 
+            playsInline 
+            className="w-full rounded-lg"
+        />
+        <button
+            type="button"
+            onClick={captureImage}
+            className="w-full mt-2 bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg"
+        >
+            📸 Capture Image
+        </button>
+    </div>
+) : imagePreview ? (
+    <div className="mb-4">
+        <img 
+            id="imagePreview" 
+            src={imagePreview} 
+            alt="Captured wildlife" 
+            className="w-full rounded-lg"
+        />
+        <button
+            type="button"
+            onClick={() => {
+                setImagePreview(null);
+                setImageFile(null);
+                startCamera();
+            }}
+            className="w-full mt-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg"
+        >
+            ❌ Retake Photo
+        </button>
+    </div>
+) : null}
                                 {showAddForm && (
                                     <form onSubmit={handleSubmit} className="space-y-4 mb-6 bg-gray-50 p-4 rounded-lg">
                                         <div className="flex justify-between items-start">
@@ -379,7 +368,6 @@ const handleSubmit = async (e) => {
                                                 ❌
                                             </button>
                                         </div>
-                                        
                                         
                                         <div>
                                             <label className="block mb-2">🦒 Animal</label>
