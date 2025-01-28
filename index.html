@@ -163,13 +163,22 @@
                         } 
                     });
                     
-                    const videoElement = document.getElementById('cameraPreview');
-                    videoElement.srcObject = stream;
-                    videoElement.onloadedmetadata = () => {
-                        videoElement.play();
-                    };
-                    
-                    setCameraStream(stream);
+                    // Use a setTimeout to ensure DOM is ready
+                    setTimeout(() => {
+                        const videoElement = document.getElementById('cameraPreview');
+                        if (videoElement) {
+                            videoElement.srcObject = stream;
+                            
+                            videoElement.onloadedmetadata = () => {
+                                videoElement.play();
+                            };
+                            
+                            setCameraStream(stream);
+                        } else {
+                            console.error('Video element not found');
+                            setError('Could not find video element');
+                        }
+                    }, 100);
                 } catch (err) {
                     console.error('Camera access error:', err);
                     setError(`Could not access camera: ${err.message}`);
@@ -199,7 +208,7 @@
                 }, 'image/jpeg');
             };
 
-const getCurrentLocation = () => {
+            const getCurrentLocation = () => {
     if (!navigator.geolocation) {
         setError('Geolocation is not supported by your browser');
         return;
@@ -218,8 +227,8 @@ const getCurrentLocation = () => {
             map.panTo(location);
             map.setZoom(17);
             
-            // Start camera after getting location
-            startCamera();
+            // Ensure the form is rendered before starting camera
+            requestAnimationFrame(startCamera);
         },
         () => {
             setError('Unable to get your location');
