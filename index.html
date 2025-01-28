@@ -7,7 +7,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
-    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAdhSLa0IEty5AaakvM-gBTGhgAcvF4OJA"></script>
+    <script src="https://maps.googleapis.com/maps/api/js?key=YOUR_GOOGLE_MAPS_API_KEY"></script>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <style>
         .map-container {
@@ -16,12 +16,25 @@
             border-radius: 0.5rem;
             overflow: hidden;
         }
+        .image-preview {
+            max-width: 200px;
+            max-height: 200px;
+            object-fit: cover;
+        }
+        .expire-warning {
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
     </style>
 </head>
 <body class="bg-gray-50">
     <div id="root"></div>
     <script type="text/babel">
-        const API_URL = 'https://ucsc-animals.onrender.com/api'; // Replace with your actual backend URL
+        const API_URL = 'https://ucsc-animals.onrender.com/api';
         
         const ANIMALS = [
             { id: 'deer', label: 'Deer', emoji: '🦌', color: '#8B4513' },
@@ -33,18 +46,7 @@
         ];
 
         const UCSC_CENTER = { lat: 36.9916, lng: -122.0583 };
-
-        const createMarkerIcon = (emoji) => ({
-            url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 42 42" width="42" height="42">
-                    <circle cx="21" cy="21" r="20" fill="white" stroke="#666666" stroke-width="2"/>
-                    <text x="21" y="21" text-anchor="middle" dominant-baseline="central" font-size="20px">${emoji}</text>
-                </svg>
-            `)}`,
-            size: new google.maps.Size(42, 42),
-            anchor: new google.maps.Point(21, 21),
-            scaledSize: new google.maps.Size(42, 42)
-        });
+        const HOUR_IN_MS = 3600000;
 
         function WildlifeTracker() {
             const [sightings, setSightings] = React.useState([]);
@@ -54,118 +56,82 @@
             const [map, setMap] = React.useState(null);
             const [markers, setMarkers] = React.useState([]);
             const [loading, setLoading] = React.useState(true);
+            const [selectedImage, setSelectedImage] = React.useState(null);
+            const [imagePreview, setImagePreview] = React.useState(null);
 
             React.useEffect(() => {
-                // Initialize map
-                const mapInstance = new google.maps.Map(document.getElementById('map'), {
-                    center: UCSC_CENTER,
-                    zoom: 14,
-                    styles: [
-                        {
-                            featureType: "poi",
-                            elementType: "labels",
-                            stylers: [{ visibility: "off" }]
-                        }
-                    ]
-                });
-                setMap(mapInstance);
-
-                // Fetch initial sightings
                 fetchSightings();
+                initializeMap();
+                // Check for expired sightings every minute
+                const interval = setInterval(checkExpiredSightings, 60000);
+                return () => clearInterval(interval);
             }, []);
 
-            const fetchSightings = async () => {
-                try {
-                    const response = await fetch(`${API_URL}/sightings`);
-                    if (!response.ok) throw new Error('Failed to fetch sightings');
-                    const data = await response.json();
-                    setSightings(data);
-                } catch (err) {
-                    setError('Failed to load sightings');
-                } finally {
-                    setLoading(false);
-                }
-            };
-
-            React.useEffect(() => {
-                if (map && sightings.length > 0) {
-                    updateMapMarkers();
-                }
-            }, [sightings, map]);
-
-            const updateMapMarkers = () => {
-                // Clear existing markers
-                markers.forEach(marker => marker.setMap(null));
-                
-                const newMarkers = sightings.map(sighting => {
-                    const animal = ANIMALS.find(a => a.id === sighting.animal);
-                    const emoji = animal.emoji + (sighting.isBaby ? '🍼' : '');
-                    
-                    const marker = new google.maps.Marker({
-                        position: sighting.location,
-                        map: map,
-                        icon: createMarkerIcon(emoji),
-                        title: `${animal.label}${sighting.isBaby ? ' (Baby)' : ''}`
-                    });
-
-                    const infoWindow = new google.maps.InfoWindow({
-                        content: `
-                            <div class="p-2">
-                                <h3 class="text-lg font-bold">${emoji} ${animal.label}${sighting.isBaby ? ' (Baby)' : ''}</h3>
-                                <p class="text-sm">🕒 ${new Date(sighting.timestamp).toLocaleString()}</p>
-                            </div>
-                        `
-                    });
-
-                    marker.addListener('click', () => infoWindow.open(map, marker));
-                    return marker;
+            const checkExpiredSightings = async () => {
+                const now = new Date().getTime();
+                const expired = sightings.filter(sighting => {
+                    const lastUpdate = new Date(sighting.lastUpdate || sighting.timestamp).getTime();
+                    return (now - lastUpdate) > HOUR_IN_MS;
                 });
 
-                setMarkers(newMarkers);
+                if (expired.length > 0) {
+                    try {
+                        await Promise.all(expired.map(sighting => 
+                            fetch(`${API_URL}/sightings/${sighting._id}`, { method: 'DELETE' })
+                        ));
+                        fetchSightings();
+                    } catch (err) {
+                        console.error('Error deleting expired sightings:', err);
+                    }
+                }
             };
 
-            const getCurrentLocation = () => {
-                if (!navigator.geolocation) {
-                    setError('Geolocation is not supported by your browser');
+            const handleImageChange = (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    if (file.size > 5 * 1024 * 1024) {
+                        setError('Image must be smaller than 5MB');
+                        return;
+                    }
+
+                    const reader = new FileReader();
+                    reader.onloadend = () => {
+                        setSelectedImage(file);
+                        setImagePreview(reader.result);
+                    };
+                    reader.readAsDataURL(file);
+                }
+            };
+
+            const handleStillHere = async (sightingId) => {
+                try {
+                    const response = await fetch(`${API_URL}/sightings/${sightingId}/refresh`, {
+                        method: 'POST'
+                    });
+                    if (!response.ok) throw new Error('Failed to refresh sighting');
+                    fetchSightings();
+                } catch (err) {
+                    setError('Failed to update sighting: ' + err.message);
+                }
+            };
+
+            // Rest of your existing functions (fetchSightings, initializeMap, etc.)
+            // Modified handleSubmit to include image upload
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                if (!selectedImage) {
+                    setError('Please add a photo of the animal');
                     return;
                 }
 
-                setError('');
-                setShowAddForm(true);
-
-                navigator.geolocation.getCurrentPosition(
-                    (position) => {
-                        const location = {
-                            lat: position.coords.latitude,
-                            lng: position.coords.longitude
-                        };
-                        setUserLocation(location);
-                        map.panTo(location);
-                        map.setZoom(17);
-                    },
-                    () => {
-                        setError('Unable to get your location');
-                        setShowAddForm(false);
-                    }
-                );
-            };
-
-            const handleSubmit = async (e) => {
-                e.preventDefault();
                 const formData = new FormData(e.target);
-                const newSighting = {
-                    animal: formData.get('animal'),
-                    isBaby: formData.get('isBaby') === 'true',
-                    location: userLocation,
-                };
-                
+                formData.append('image', selectedImage);
+                formData.append('location', JSON.stringify(userLocation));
+
                 try {
                     const response = await fetch(`${API_URL}/sightings`, {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify(newSighting),
+                        body: formData
                     });
                     
                     if (!response.ok) throw new Error('Failed to save sighting');
@@ -174,131 +140,93 @@
                     setSightings([savedSighting, ...sightings]);
                     setShowAddForm(false);
                     setUserLocation(null);
+                    setSelectedImage(null);
+                    setImagePreview(null);
                 } catch (err) {
-                    setError('Failed to save sighting');
+                    setError('Failed to save sighting: ' + err.message);
                 }
             };
 
+            // Modify your existing form JSX to include these new elements
             return (
                 <div className="max-w-7xl mx-auto p-4">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div>
-                            <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-                                <div className="flex items-center justify-between mb-6">
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-2xl">🦌</span>
-                                        <span className="text-xl font-bold">UCSC Wildlife Tracker</span>
-                                    </div>
-                                    <button
-                                        onClick={getCurrentLocation}
-                                        className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2"
-                                    >
-                                        <span>📍</span> Add Sighting
-                                    </button>
-                                </div>
-
-                                {error && (
-                                    <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
-                                        {error}
-                                    </div>
-                                )}
-
-                                {showAddForm && (
-                                    <form onSubmit={handleSubmit} className="space-y-4 mb-6 bg-gray-50 p-4 rounded-lg">
-                                        <div className="flex justify-between items-start">
-                                            <h3 className="text-lg font-semibold">🆕 New Sighting</h3>
-                                            <button
-                                                type="button"
-                                                onClick={() => setShowAddForm(false)}
-                                                className="text-gray-500 hover:text-gray-700"
-                                            >
-                                                ❌
-                                            </button>
-                                        </div>
-                                        
-                                        <div>
-                                            <label className="block mb-2">🦒 Animal</label>
-                                            <select
-                                                name="animal"
-                                                required
-                                                className="w-full p-2 border rounded-lg"
-                                            >
-                                                {ANIMALS.map(animal => (
-                                                    <option key={animal.id} value={animal.id}>
-                                                        {animal.emoji} {animal.label}
-                                                    </option>
-                                                ))}
-                                            </select>
-                                        </div>
-
-                                        <div>
-                                            <label className="block mb-2">👶 Age</label>
-                                            <select
-                                                name="isBaby"
-                                                className="w-full p-2 border rounded-lg"
-                                            >
-                                                <option value="false">🦊 Adult</option>
-                                                <option value="true">🍼 Baby</option>
-                                            </select>
-                                        </div>
-
-                                        {userLocation ? (
-                                            <div className="text-sm text-gray-600">
-                                                📍 Location: {userLocation.lat.toFixed(6)}, {userLocation.lng.toFixed(6)}
-                                            </div>
-                                        ) : (
-                                            <div className="text-sm text-gray-600 animate-pulse">
-                                                📱 Getting your location...
-                                            </div>
+                            {/* Your existing header */}
+                            
+                            {showAddForm && (
+                                <form onSubmit={handleSubmit} className="space-y-4 mb-6 bg-gray-50 p-4 rounded-lg">
+                                    {/* Existing form fields */}
+                                    
+                                    <div>
+                                        <label className="block mb-2">📸 Photo</label>
+                                        <input
+                                            type="file"
+                                            accept="image/*"
+                                            onChange={handleImageChange}
+                                            required
+                                            className="w-full p-2 border rounded-lg"
+                                        />
+                                        {imagePreview && (
+                                            <img 
+                                                src={imagePreview} 
+                                                alt="Preview" 
+                                                className="mt-2 image-preview rounded"
+                                            />
                                         )}
+                                    </div>
+                                    
+                                    {/* Rest of your form */}
+                                </form>
+                            )}
 
-                                        <button
-                                            type="submit"
-                                            disabled={!userLocation}
-                                            className={`w-full px-4 py-2 rounded-lg ${
-                                                userLocation 
-                                                    ? 'bg-green-500 hover:bg-green-600 text-white' 
-                                                    : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                                            }`}
-                                        >
-                                            {userLocation ? '✅ Submit Sighting' : '⏳ Waiting for location...'}
-                                        </button>
-                                    </form>
-                                )}
+                            <div className="space-y-4">
+                                <h3 className="text-lg font-semibold">📝 Recent Sightings</h3>
+                                {loading ? (
+                                    <div className="text-center py-4">Loading...</div>
+                                ) : sightings.length === 0 ? (
+                                    <p className="text-gray-500">👀 No sightings reported yet</p>
+                                ) : (
+                                    sightings.map(sighting => {
+                                        const timeSinceUpdate = new Date().getTime() - new Date(sighting.lastUpdate || sighting.timestamp).getTime();
+                                        const minutesRemaining = Math.floor((HOUR_IN_MS - timeSinceUpdate) / 60000);
+                                        const isExpiringSoon = minutesRemaining < 10;
 
-                                <div className="space-y-4">
-                                    <h3 className="text-lg font-semibold">📝 Recent Sightings</h3>
-                                    {loading ? (
-                                        <div className="text-center py-4">Loading...</div>
-                                    ) : sightings.length === 0 ? (
-                                        <p className="text-gray-500">👀 No sightings reported yet</p>
-                                    ) : (
-                                        sightings.map(sighting => (
+                                        return (
                                             <div
                                                 key={sighting._id}
-                                                className="p-4 border rounded-lg hover:bg-gray-50 cursor-pointer"
-                                                onClick={() => {
-                                                    map.panTo(sighting.location);
-                                                    map.setZoom(17);
-                                                }}
+                                                className={`p-4 border rounded-lg hover:bg-gray-50 ${isExpiringSoon ? 'expire-warning' : ''}`}
                                             >
-                                                <div>
-                                                    <h4 className="font-medium">
-                                                        {ANIMALS.find(a => a.id === sighting.animal)?.emoji} 
-                                                        {ANIMALS.find(a => a.id === sighting.animal)?.label}
-                                                        {sighting.isBaby && ' 🍼'}
-                                                    </h4>
-                                                    <p className="text-sm text-gray-600">
-                                                        🕒 {new Date(sighting.timestamp).toLocaleString()}
-                                                    </p>
-                                                    <p className="text-sm text-gray-600">
-                                                        📍 {sighting.location.lat.toFixed(6)}, {sighting.location.lng.toFixed(6)}
-                                                    </p>
+                                                <div className="flex items-start justify-between">
+                                                    <div>
+                                                        <h4 className="font-medium">
+                                                            {ANIMALS.find(a => a.id === sighting.animal)?.emoji} 
+                                                            {ANIMALS.find(a => a.id === sighting.animal)?.label}
+                                                            {sighting.isBaby && ' 🍼'}
+                                                        </h4>
+                                                        <p className="text-sm text-gray-600">
+                                                            🕒 {new Date(sighting.timestamp).toLocaleString()}
+                                                        </p>
+                                                        <p className="text-sm text-gray-600">
+                                                            ⏳ Expires in {minutesRemaining} minutes
+                                                        </p>
+                                                    </div>
+                                                    <button
+                                                        onClick={() => handleStillHere(sighting._id)}
+                                                        className="bg-green-500 text-white px-3 py-1 rounded hover:bg-green-600"
+                                                    >
+                                                        Still Here! 👋
+                                                    </button>
                                                 </div>
+                                                <img 
+                                                    src={sighting.imageUrl} 
+                                                    alt="Wildlife sighting" 
+                                                    className="mt-2 image-preview rounded"
+                                                />
                                             </div>
-                                        ))
-                                    )}
-                                </div>
+                                        );
+                                    })
+                                )}
                             </div>
                         </div>
 
