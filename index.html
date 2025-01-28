@@ -7,7 +7,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
-    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyB41DRUbKWJHPxaFjMAwdrzWzbVKartNGg"></script>
+    <script src="https://maps.googleapis.com/maps/api/js?key=YOUR_GOOGLE_MAPS_API_KEY"></script>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <style>
         .map-container {
@@ -16,25 +16,13 @@
             border-radius: 0.5rem;
             overflow: hidden;
         }
-        .marker-label {
-            color: #000;
-            font-size: 16px;
-            font-weight: bold;
-            text-align: center;
-        }
-        .pulse {
-            animation: pulse 2s infinite;
-        }
-        @keyframes pulse {
-            0% { transform: scale(1); }
-            50% { transform: scale(1.1); }
-            100% { transform: scale(1); }
-        }
     </style>
 </head>
 <body class="bg-gray-50">
     <div id="root"></div>
     <script type="text/babel">
+        const API_URL = 'YOUR_BACKEND_URL'; // Replace with your actual backend URL
+        
         const ANIMALS = [
             { id: 'deer', label: 'Deer', emoji: '🦌', color: '#8B4513' },
             { id: 'turkey', label: 'Turkey', emoji: '🦃', color: '#654321' },
@@ -46,19 +34,17 @@
 
         const UCSC_CENTER = { lat: 36.9916, lng: -122.0583 };
 
-        const createMarkerIcon = (emoji) => {
-            return {
-                url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 42 42" width="42" height="42">
-                        <circle cx="21" cy="21" r="20" fill="white" stroke="#666666" stroke-width="2"/>
-                        <text x="21" y="21" text-anchor="middle" dominant-baseline="central" font-size="20px">${emoji}</text>
-                    </svg>
-                `)}`,
-                size: new google.maps.Size(42, 42),
-                anchor: new google.maps.Point(21, 21),
-                scaledSize: new google.maps.Size(42, 42)
-            };
-        };
+        const createMarkerIcon = (emoji) => ({
+            url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 42 42" width="42" height="42">
+                    <circle cx="21" cy="21" r="20" fill="white" stroke="#666666" stroke-width="2"/>
+                    <text x="21" y="21" text-anchor="middle" dominant-baseline="central" font-size="20px">${emoji}</text>
+                </svg>
+            `)}`,
+            size: new google.maps.Size(42, 42),
+            anchor: new google.maps.Point(21, 21),
+            scaledSize: new google.maps.Size(42, 42)
+        });
 
         function WildlifeTracker() {
             const [sightings, setSightings] = React.useState([]);
@@ -67,13 +53,10 @@
             const [error, setError] = React.useState('');
             const [map, setMap] = React.useState(null);
             const [markers, setMarkers] = React.useState([]);
+            const [loading, setLoading] = React.useState(true);
 
             React.useEffect(() => {
-                const savedSightings = localStorage.getItem('sightings');
-                if (savedSightings) {
-                    setSightings(JSON.parse(savedSightings));
-                }
-
+                // Initialize map
                 const mapInstance = new google.maps.Map(document.getElementById('map'), {
                     center: UCSC_CENTER,
                     zoom: 14,
@@ -86,16 +69,32 @@
                     ]
                 });
                 setMap(mapInstance);
+
+                // Fetch initial sightings
+                fetchSightings();
             }, []);
+
+            const fetchSightings = async () => {
+                try {
+                    const response = await fetch(`${API_URL}/sightings`);
+                    if (!response.ok) throw new Error('Failed to fetch sightings');
+                    const data = await response.json();
+                    setSightings(data);
+                } catch (err) {
+                    setError('Failed to load sightings');
+                } finally {
+                    setLoading(false);
+                }
+            };
 
             React.useEffect(() => {
                 if (map && sightings.length > 0) {
                     updateMapMarkers();
                 }
-                localStorage.setItem('sightings', JSON.stringify(sightings));
             }, [sightings, map]);
 
             const updateMapMarkers = () => {
+                // Clear existing markers
                 markers.forEach(marker => marker.setMap(null));
                 
                 const newMarkers = sightings.map(sighting => {
@@ -118,10 +117,7 @@
                         `
                     });
 
-                    marker.addListener('click', () => {
-                        infoWindow.open(map, marker);
-                    });
-
+                    marker.addListener('click', () => infoWindow.open(map, marker));
                     return marker;
                 });
 
@@ -130,7 +126,7 @@
 
             const getCurrentLocation = () => {
                 if (!navigator.geolocation) {
-                    setError('📱 Geolocation is not supported by your browser');
+                    setError('Geolocation is not supported by your browser');
                     return;
                 }
 
@@ -148,26 +144,39 @@
                         map.setZoom(17);
                     },
                     () => {
-                        setError('📍 Unable to get your location');
+                        setError('Unable to get your location');
                         setShowAddForm(false);
                     }
                 );
             };
 
-            const handleSubmit = (e) => {
+            const handleSubmit = async (e) => {
                 e.preventDefault();
                 const formData = new FormData(e.target);
                 const newSighting = {
-                    id: Date.now(),
                     animal: formData.get('animal'),
                     isBaby: formData.get('isBaby') === 'true',
                     location: userLocation,
-                    timestamp: new Date().toISOString(),
                 };
                 
-                setSightings([...sightings, newSighting]);
-                setShowAddForm(false);
-                setUserLocation(null);
+                try {
+                    const response = await fetch(`${API_URL}/sightings`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify(newSighting),
+                    });
+                    
+                    if (!response.ok) throw new Error('Failed to save sighting');
+                    
+                    const savedSighting = await response.json();
+                    setSightings([savedSighting, ...sightings]);
+                    setShowAddForm(false);
+                    setUserLocation(null);
+                } catch (err) {
+                    setError('Failed to save sighting');
+                }
             };
 
             return (
@@ -182,7 +191,7 @@
                                     </div>
                                     <button
                                         onClick={getCurrentLocation}
-                                        className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-all"
+                                        className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2"
                                     >
                                         <span>📍</span> Add Sighting
                                     </button>
@@ -246,7 +255,7 @@
                                         <button
                                             type="submit"
                                             disabled={!userLocation}
-                                            className={`w-full px-4 py-2 rounded-lg transition-all ${
+                                            className={`w-full px-4 py-2 rounded-lg ${
                                                 userLocation 
                                                     ? 'bg-green-500 hover:bg-green-600 text-white' 
                                                     : 'bg-gray-300 text-gray-500 cursor-not-allowed'
@@ -259,13 +268,15 @@
 
                                 <div className="space-y-4">
                                     <h3 className="text-lg font-semibold">📝 Recent Sightings</h3>
-                                    {sightings.length === 0 ? (
+                                    {loading ? (
+                                        <div className="text-center py-4">Loading...</div>
+                                    ) : sightings.length === 0 ? (
                                         <p className="text-gray-500">👀 No sightings reported yet</p>
                                     ) : (
                                         sightings.map(sighting => (
                                             <div
-                                                key={sighting.id}
-                                                className="p-4 border rounded-lg hover:bg-gray-50 cursor-pointer transition-all"
+                                                key={sighting._id}
+                                                className="p-4 border rounded-lg hover:bg-gray-50 cursor-pointer"
                                                 onClick={() => {
                                                     map.panTo(sighting.location);
                                                     map.setZoom(17);
