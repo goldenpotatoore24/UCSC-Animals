@@ -2,20 +2,12 @@ import express from 'express';
 import mongoose from 'mongoose';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { v2 as cloudinary } from 'cloudinary';
 
 // Load environment variables
 dotenv.config();
 
 // Initialize express
 const app = express();
-
-// Configure Cloudinary
-cloudinary.config({
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-    api_key: process.env.CLOUDINARY_API_KEY,
-    api_secret: process.env.CLOUDINARY_API_SECRET
-});
 
 // Middleware
 app.use(cors());
@@ -54,10 +46,6 @@ const sightingSchema = new mongoose.Schema({
             max: 180
         }
     },
-    imageUrl: {
-        type: String,
-        required: true
-    },
     timestamp: {
         type: Date,
         default: Date.now,
@@ -83,23 +71,6 @@ const cleanupExpiredSightings = async () => {
     }
 };
 
-// Routes
-app.post('/api/upload', async (req, res) => {
-    try {
-        const { image } = req.body; // Base64 image data
-        
-        // Upload to Cloudinary
-        const uploadResponse = await cloudinary.uploader.upload(image, {
-            folder: 'wildlife-sightings',
-        });
-
-        res.json({ url: uploadResponse.secure_url });
-    } catch (error) {
-        console.error('Error uploading image:', error);
-        res.status(500).json({ error: 'Error uploading image' });
-    }
-});
-
 // Run cleanup every 30 minutes
 setInterval(cleanupExpiredSightings, 30 * 60 * 1000);
 
@@ -123,8 +94,8 @@ app.get('/api/sightings', async (req, res) => {
 
 app.post('/api/sightings', async (req, res) => {
     try {
-        const { animal, location, imageUrl } = req.body;
-        if (!animal || !location || !location.lat || !location.lng || !imageUrl) {
+        const { animal, location } = req.body;
+        if (!animal || !location || !location.lat || !location.lng) {
             return res.status(400).json({ error: 'Missing required fields' });
         }
 
@@ -134,8 +105,7 @@ app.post('/api/sightings', async (req, res) => {
             location: {
                 lat: parseFloat(location.lat),
                 lng: parseFloat(location.lng)
-            },
-            imageUrl
+            }
         });
 
         const savedSighting = await sighting.save();
