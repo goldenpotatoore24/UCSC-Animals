@@ -69,6 +69,8 @@
             const [map, setMap] = React.useState(null);
             const [markers, setMarkers] = React.useState([]);
             const [loading, setLoading] = React.useState(true);
+            const [capturedImage, setCapturedImage] = React.useState(null);
+            const fileInputRef = React.useRef(null);
 
             React.useEffect(() => {
                 // Initialize map
@@ -167,34 +169,214 @@
                 );
             };
 
-            const handleSubmit = async (e) => {
-                e.preventDefault();
-                const formData = new FormData(e.target);
-                const newSighting = {
-                    animal: formData.get('animal'),
-                    isBaby: formData.get('isBaby') === 'true',
-                    location: userLocation,
-                };
-                
-                try {
-                    const response = await fetch(`${API_URL}/sightings`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify(newSighting),
-                    });
-                    
-                    if (!response.ok) throw new Error('Failed to save sighting');
-                    
-                    const savedSighting = await response.json();
-                    setSightings([savedSighting, ...sightings]);
-                    setShowAddForm(false);
-                    setUserLocation(null);//
-                } catch (err) {
-                    setError('Failed to save sighting');
+            const handleImageCapture = (event) => {
+                const file = event.target.files[0];
+                if (file) {
+                    setCapturedImage(file);
                 }
             };
+
+            const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (!capturedImage) {
+            setError('Please take a photo first');
+            return;
+        }
+
+        const formData = new FormData();
+        const sightingData = {
+            animal: e.target.animal.value,
+            isBaby: e.target.isBaby.value === 'true',
+            location: userLocation,
+        };
+
+        formData.append('sighting', JSON.stringify(sightingData));
+        formData.append('image', capturedImage);
+
+        try {
+            const response = await fetch(`${API_URL}/sightings`, {
+                method: 'POST',
+                body: formData,
+            });
+
+            if (!response.ok) throw new Error('Failed to save sighting');
+
+            const savedSighting = await response.json();
+            setSightings([savedSighting, ...sightings]);
+            setShowAddForm(false);
+            setUserLocation(null);
+            setCapturedImage(null);
+            if (fileInputRef.current) {
+                fileInputRef.current.value = ''; // Reset file input
+            }
+        } catch (err) {
+            setError('Failed to save sighting');
+        }
+    };
+
+    return (
+        <div className="max-w-7xl mx-auto p-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+                        {/* ... existing header code ... */}
+
+                        {showAddForm && (
+                            <form onSubmit={handleSubmit} className="space-y-4 mb-6 bg-gray-50 p-4 rounded-lg">
+                                <div className="flex justify-between items-start">
+                                    <h3 className="text-lg font-semibold">🆕 New Sighting</h3>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setShowAddForm(false);
+                                            setCapturedImage(null);
+                                        }}
+                                        className="text-gray-500 hover:text-gray-700"
+                                    >
+                                        ❌
+                                    </button>
+                                </div>
+
+                                {/* Camera capture section */}
+                                <div className="space-y-4">
+                                    {capturedImage ? (
+                                        <div className="relative">
+                                            <img
+                                                src={URL.createObjectURL(capturedImage)}
+                                                alt="Captured"
+                                                className="w-full h-64 object-cover rounded-lg"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setCapturedImage(null);
+                                                    if (fileInputRef.current) {
+                                                        fileInputRef.current.value = '';
+                                                    }
+                                                }}
+                                                className="absolute top-2 right-2 bg-white rounded-full p-2 shadow-lg"
+                                            >
+                                                ❌
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            <label className="block font-medium">📸 Take a Photo</label>
+                                            <input
+                                                ref={fileInputRef}
+                                                type="file"
+                                                accept="image/*"
+                                                capture="environment"
+                                                onChange={handleImageCapture}
+                                                className="w-full p-2 border rounded-lg bg-white"
+                                            />
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div>
+                                    <label className="block mb-2">🦒 Animal</label>
+                                    <select
+                                        name="animal"
+                                        required
+                                        className="w-full p-2 border rounded-lg"
+                                    >
+                                        {ANIMALS.map(animal => (
+                                            <option key={animal.id} value={animal.id}>
+                                                {animal.emoji} {animal.label}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label className="block mb-2">👶 Age</label>
+                                    <select
+                                        name="isBaby"
+                                        className="w-full p-2 border rounded-lg"
+                                    >
+                                        <option value="false">🦊 Adult</option>
+                                        <option value="true">🍼 Baby</option>
+                                    </select>
+                                </div>
+
+                                {userLocation ? (
+                                    <div className="text-sm text-gray-600">
+                                        📍 Location: {userLocation.lat.toFixed(6)}, {userLocation.lng.toFixed(6)}
+                                    </div>
+                                ) : (
+                                    <div className="text-sm text-gray-600 animate-pulse">
+                                        📱 Getting your location...
+                                    </div>
+                                )}
+
+                                <button
+                                    type="submit"
+                                    disabled={!userLocation || !capturedImage}
+                                    className={`w-full px-4 py-2 rounded-lg ${
+                                        userLocation && capturedImage
+                                            ? 'bg-green-500 hover:bg-green-600 text-white'
+                                            : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                    }`}
+                                >
+                                    {!userLocation ? '⏳ Waiting for location...' : 
+                                     !capturedImage ? '📸 Take a photo first' :
+                                     '✅ Submit Sighting'}
+                                </button>
+                            </form>
+                        )}
+
+                        {/* Update the sightings list to show images */}
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-semibold">📝 Recent Sightings</h3>
+                            {loading ? (
+                                <div className="text-center py-4">Loading...</div>
+                            ) : sightings.length === 0 ? (
+                                <p className="text-gray-500">👀 No sightings reported yet</p>
+                            ) : (
+                                sightings.map(sighting => (
+                                    <div
+                                        key={sighting._id}
+                                        className="p-4 border rounded-lg hover:bg-gray-50 cursor-pointer"
+                                        onClick={() => {
+                                            map.panTo(sighting.location);
+                                            map.setZoom(17);
+                                        }}
+                                    >
+                                        <div className="flex gap-4">
+                                            <img
+                                                src={sighting.imageUrl}
+                                                alt={`${sighting.animal} sighting`}
+                                                className="w-24 h-24 object-cover rounded-lg"
+                                            />
+                                            <div>
+                                                <h4 className="font-medium">
+                                                    {ANIMALS.find(a => a.id === sighting.animal)?.emoji}
+                                                    {ANIMALS.find(a => a.id === sighting.animal)?.label}
+                                                    {sighting.isBaby && ' 🍼'}
+                                                </h4>
+                                                <p className="text-sm text-gray-600">
+                                                    🕒 {formatRelativeTime(sighting.timestamp)}
+                                                </p>
+                                                <p className="text-sm text-gray-600">
+                                                    📍 {sighting.location.lat.toFixed(6)}, {sighting.location.lng.toFixed(6)}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                <div className="map-container">
+                    <div id="map" style={{ width: '100%', height: '100%' }}></div>
+                </div>
+            </div>
+        </div>
+    );
+
 
             const handleStillHere = async (sightingId) => {
     try {
