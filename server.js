@@ -2,12 +2,34 @@ import express from 'express';
 import mongoose from 'mongoose';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import { v2 as cloudinary } from 'cloudinary';
+import multer from 'multer';
+import { CloudinaryStorage } from 'multer-storage-cloudinary';
 
 // Load environment variables
 dotenv.config();
 
 // Initialize express
 const app = express();
+
+// Configure Cloudinary
+cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET
+});
+
+// Configure Multer and Cloudinary storage
+const storage = new CloudinaryStorage({
+    cloudinary: cloudinary,
+    params: {
+        folder: 'wildlife-sightings',
+        allowed_formats: ['jpg', 'jpeg', 'png'],
+        transformation: [{ width: 1000, height: 1000, crop: 'limit' }]
+    }
+});
+
+const upload = multer({ storage: storage });
 
 // Middleware
 app.use(cors());
@@ -45,6 +67,10 @@ const sightingSchema = new mongoose.Schema({
             min: -180,
             max: 180
         }
+    },
+    imageUrl: {
+        type: String,
+        required: true
     },
     timestamp: {
         type: Date,
@@ -92,20 +118,28 @@ app.get('/api/sightings', async (req, res) => {
     }
 });
 
-app.post('/api/sightings', async (req, res) => {
+// Updated POST route to handle image upload
+app.post('/api/sightings', upload.single('image'), async (req, res) => {
     try {
-        const { animal, location } = req.body;
+        if (!req.file) {
+            return res.status(400).json({ error: 'Image is required' });
+        }
+
+        const sightingData = JSON.parse(req.body.sighting);
+        const { animal, location, isBaby } = sightingData;
+
         if (!animal || !location || !location.lat || !location.lng) {
             return res.status(400).json({ error: 'Missing required fields' });
         }
 
         const sighting = new Sighting({
-            animal: req.body.animal,
-            isBaby: req.body.isBaby || false,
+            animal,
+            isBaby: isBaby || false,
             location: {
                 lat: parseFloat(location.lat),
                 lng: parseFloat(location.lng)
-            }
+            },
+            imageUrl: req.file.path
         });
 
         const savedSighting = await sighting.save();
@@ -119,7 +153,7 @@ app.post('/api/sightings', async (req, res) => {
     }
 });
 
-// New route to mark a sighting as "still here"
+// Route to mark a sighting as "still here"
 app.post('/api/sightings/:id/still-here', async (req, res) => {
     try {
         const sighting = await Sighting.findByIdAndUpdate(
