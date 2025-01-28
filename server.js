@@ -48,12 +48,31 @@ const sightingSchema = new mongoose.Schema({
     },
     timestamp: {
         type: Date,
+        default: Date.now,
+        expires: 3600 // Automatically delete after 1 hour (3600 seconds)
+    },
+    lastUpdated: {
+        type: Date,
         default: Date.now
     }
 });
 
 // Create MongoDB model
 const Sighting = mongoose.model('Sighting', sightingSchema);
+
+// Periodic cleanup job (additional safety)
+const cleanupExpiredSightings = async () => {
+    try {
+        const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+        await Sighting.deleteMany({ timestamp: { $lt: oneHourAgo } });
+        console.log('Expired sightings cleaned up');
+    } catch (error) {
+        console.error('Error cleaning up expired sightings:', error);
+    }
+};
+
+// Run cleanup every 30 minutes
+setInterval(cleanupExpiredSightings, 30 * 60 * 1000);
 
 // Health check route
 app.get('/health', (req, res) => {
@@ -97,6 +116,29 @@ app.post('/api/sightings', async (req, res) => {
             return res.status(400).json({ error: error.message });
         }
         res.status(500).json({ error: 'Error creating sighting' });
+    }
+});
+
+// New route to mark a sighting as "still here"
+app.post('/api/sightings/:id/still-here', async (req, res) => {
+    try {
+        const sighting = await Sighting.findByIdAndUpdate(
+            req.params.id, 
+            { 
+                timestamp: new Date(), // Reset the 1-hour timer
+                lastUpdated: new Date() 
+            }, 
+            { new: true }
+        );
+
+        if (!sighting) {
+            return res.status(404).json({ error: 'Sighting not found' });
+        }
+
+        res.json(sighting);
+    } catch (error) {
+        console.error('Error updating sighting:', error);
+        res.status(500).json({ error: 'Error updating sighting' });
     }
 });
 
